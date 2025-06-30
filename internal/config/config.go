@@ -6,12 +6,22 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-const CONFIG_ENV_NAME = "GO_CONFIG_ENV"
+const (
+	CONFIG_ENV_NAME    = "GO_CONFIG_ENV"
+	GO_CLI_MYSQL_CONF  = "GO_CLI_MYSQL_CONF"
+	GO_CLI_REDIS_CONF  = "GO_CLI_REDIS_CONF"
+	TENCENT_SECRET_KEY = "TENCENT_SECRET_KEY"
+	ENV_DEV            = "dev"
+	ENV_TEST           = "test"
+	ENV_PROD           = "prod"
+)
 
 type Configuration struct {
 	APP struct {
@@ -87,11 +97,12 @@ func LoadConfig() {
 	// Load configuration from file or environment variables
 	// This is a placeholder function. Actual implementation will depend on the configuration management strategy.
 	var configFile string
-	switch env := os.Getenv(CONFIG_ENV_NAME); env {
-	case "production":
+	env := os.Getenv(CONFIG_ENV_NAME)
+	switch env {
+	case ENV_PROD:
 		// Load production configuration
 		configFile = "config-prod"
-	case "testing":
+	case ENV_TEST:
 		// Load testing configuration
 		configFile = "config-test"
 	default:
@@ -99,9 +110,9 @@ func LoadConfig() {
 		configFile = "config-dev"
 	}
 	// Initialize viper to read the configuration file
-	viper.SetConfigName(configFile)      // 文件名（不带后缀）
-	viper.SetConfigType("yaml")          // 文件类型
-	viper.AddConfigPath("../../configs") // 配置文件所在路径
+	viper.SetConfigName(configFile) // 文件名（不带后缀）
+	viper.SetConfigType("yaml")     // 文件类型
+	viper.AddConfigPath("configs")  // 配置文件所在路径
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("读取配置文件失败: %v", err)
 	}
@@ -113,9 +124,50 @@ func LoadConfig() {
 	}
 
 	Config = &cfg
+	// loadSecret
+	if env == ENV_PROD || env == ENV_TEST {
+		loadSecretsFromEnv(&cfg)
+	}
 	fmt.Printf("Loaded configuration: %+v\n", Config)
 	// Set up the logger
 	SetLoggerConfig()
+}
+
+// loadSecretsFromEnv loads sensitive information from environment variables
+func loadSecretsFromEnv(cfg *Configuration) {
+	if mysqlConfEnvString := os.Getenv(GO_CLI_MYSQL_CONF); mysqlConfEnvString != "" {
+		mysqlConfArr := strings.Split(mysqlConfEnvString, ",")
+		if len(mysqlConfArr) <= 0 {
+			panic(fmt.Sprintf("获取数据库环境变量数据失败: %s", mysqlConfEnvString))
+		}
+		for k, conf := range mysqlConfArr {
+			mysqlConfInfo := strings.Split(conf, ":")
+			if len(mysqlConfInfo) != 4 {
+				panic(fmt.Sprintf("获取数据库环境变量数据失败: %s", conf))
+			}
+			port, err := strconv.Atoi(mysqlConfInfo[1])
+			if err != nil {
+				panic(fmt.Sprintf("解析数据库端口失败: %s", conf))
+			}
+			mysqlConf := DB{
+				ConnectionName: cfg.DBS[k].ConnectionName,
+				Host:           mysqlConfInfo[0],
+				Port:           port,
+				Username:       mysqlConfInfo[2],
+				Password:       mysqlConfInfo[3],
+				Database:       cfg.DBS[k].Database,
+				Driver:         cfg.DBS[k].Driver,
+				Charset:        cfg.DBS[k].Charset,
+				Debug:          cfg.DBS[k].Debug,
+			}
+			cfg.DBS[k] = mysqlConf
+		}
+		fmt.Println(cfg.DBS)
+	}
+
+	if secretKey := os.Getenv(TENCENT_SECRET_KEY); secretKey != "" {
+		cfg.TencentYun.SecretKey = secretKey
+	}
 }
 
 // SetConfig set logger config

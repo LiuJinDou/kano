@@ -2,7 +2,7 @@ package response
 
 import (
 	"fmt"
-	"kano/api/dto"
+	"kano/dto"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Ajax Put 上传（服务端计算签名）</title>
+    <style>
+      h1,
+      h2 {
+        font-weight: normal;
+      }
+
+      #msg {
+        margin-top: 10px;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.min.js"></script>
+  </head>
+  <body>
+    <h1>Ajax Put 上传（服务端计算签名）</h1>
+
+    <input id="fileSelector" type="file" />
+    <input id="submitBtn" type="submit" />
+
+    <div id="msg"></div>
+
+    <script>
+      (function () {
+        // 对更多字符编码的 url encode 格式
+        const camSafeUrlEncode = function (str) {
+          return encodeURIComponent(str)
+            .replace(/!/g, '%21')
+            .replace(/'/g, '%27')
+            .replace(/\(/g, '%28')
+            .replace(/\)/g, '%29')
+            .replace(/\*/g, '%2A');
+        };
+
+        // 计算腾讯云COS签名
+        function genCosAuthorization(opt) {
+          // opt: { TmpSecretId, TmpSecretKey, StartTime, ExpiredTime, method, pathname, headers }
+          const keyTime = `${opt.StartTime};${opt.ExpiredTime}`;
+          const signKey = CryptoJS.HmacSHA1(keyTime, opt.TmpSecretKey).toString(CryptoJS.enc.Hex);
+
+          // 头部处理
+          const headers = opt.headers || {};
+          const headerKeys = Object.keys(headers).map(k => k.toLowerCase()).sort();
+          const headerList = headerKeys.join(';');
+          console.log('headerList', headerList);
+          const headerStr = headerKeys.map(k => `${encodeURIComponent(k)}=${encodeURIComponent(headers[k])}`).join('&');
+
+          // httpString
+          const httpString = [
+            (opt.method || 'put').toLowerCase(),
+            opt.pathname,
+            '', // url param
+            headerStr,
+            ''
+          ].join('\n');
+
+          const sha1HttpString = CryptoJS.SHA1(httpString).toString(CryptoJS.enc.Hex);
+          const stringToSign = `sha1\n${keyTime}\n${sha1HttpString}\n`;
+          const signature = CryptoJS.HmacSHA1(stringToSign, signKey).toString(CryptoJS.enc.Hex);
+
+          return [
+            `q-sign-algorithm=sha1`,
+            `q-ak=${opt.TmpSecretId}`,
+            `q-sign-time=${keyTime}`,
+            `q-key-time=${keyTime}`,
+            `q-header-list=${headerList}`,
+            `q-url-param-list=`,
+            `q-signature=${signature}`
+          ].join('&');
+        }
+
+        let credentials;
+        // 计算签名
+        const getAuthorization = function (opt, callback) {
+          // 替换为自己服务端地址 获取put上传签名，demo：https://github.com/tencentyun/cos-demo/blob/main/server/upload-sign/nodejs/app.js
+          const url = `http://47.98.202.31:9198/kano/v1/upload/token?application_code=tuling`;
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true);
+          xhr.onload = function (e) {
+            
+            try {
+              const result = JSON.parse(e.target.responseText);
+              console.log(result.data);
+              credentials = result.data;
+            } catch (e) {
+              callback('获取签名出错');
+            }
+            console.log(credentials);
+            if (credentials) {
+              // 打印确认credentials是否正确
+              // console.log(credentials);       <!-- cosHost: "https://common-1317863220.cos.ap-shanghai.myqcloud.com/application/imagine_hub", -->
+              
+              callback(null, {
+                securityToken: credentials.Credentials.Token,
+                cosKey: credentials.Credentials.TmpSecretKey,
+                cosHost: "shadow-1257262858.cos.ap-shanghai.myqcloud.com/application/tuling/"
+              });
+            } else {
+              console.error(xhr.responseText);
+              callback('获取签名出错');
+            }
+          };
+          xhr.onerror = function (e) {
+            callback('获取签名出错');
+          };
+          xhr.send();
+        };
+
+        // 计算签名并上传文件
+        const uploadFile = function (file, callback) {
+          const fileName = file.name;
+          // 获取文件后缀名
+          let ext = '';
+          const lastDotIndex = fileName.lastIndexOf('.');
+          if (lastDotIndex > -1) {
+            ext = fileName.substring(lastDotIndex + 1);
+          }
+          getAuthorization({ ext }, function (err, info) {
+            if (err) {
+              alert(err);
+              return;
+            }
+            console.log(credentials);
+            if (credentials.Credentials) {
+              // 兼容后端返回格式
+              const cred = credentials.Credentials;
+              const StartTime = credentials.StartTime || credentials.ExpiredTime || credentials.ExpiredTime;
+              const ExpiredTime = credentials.ExpiredTime || credentials.ExpiredTime;
+              const filePath = '/application/tuling/' + fileName; // 你可以自定义路径
+              const host = 'shadow-1257262858.cos.ap-shanghai.myqcloud.com';
+              const headers = {
+                // 'Content-Length': file.size,
+                 // 'Content-Type': file.type,
+                // 'Host': host
+              };
+              const authorization = genCosAuthorization({
+                TmpSecretId: cred.TmpSecretId,
+                TmpSecretKey: cred.TmpSecretKey,
+                StartTime: credentials.StartTime || credentials.ExpiredTime,
+                ExpiredTime: credentials.ExpiredTime,
+                method: 'put',
+                pathname: filePath,
+                headers
+              });
+              const url = `https://${host}${filePath}`;
+              const xhr = new XMLHttpRequest();
+              xhr.open('PUT', url, true);
+              xhr.setRequestHeader('Authorization', authorization);
+              xhr.setRequestHeader('x-cos-security-token', cred.Token);
+              Object.keys(headers).forEach(k => xhr.setRequestHeader(k, headers[k]));
+              xhr.upload.onprogress = function (e) {
+                console.log(
+                  '上传进度 ' +
+                    Math.round((e.loaded / e.total) * 10000) / 100 +
+                    '%'
+                );
+              };
+              xhr.onload = function () {
+                if (/^2\d\d$/.test('' + xhr.status)) {
+                  const ETag = xhr.getResponseHeader('etag');
+                  callback(null, { url: url, ETag: ETag });
+                } else {
+                  console.log(xhr.responseText);
+                  callback('文件 ' + fileName + ' 上传失败，状态码：' + xhr.status);
+                }
+              };
+              xhr.onerror = function () {
+                callback(
+                  '文件 ' + fileName + ' 上传失败，请检查是否没配置 CORS 跨域规则'
+                );
+              };
+              xhr.send(file);
+            } else {
+              callback('获取临时密钥失败');
+            }
+          });
+        };
+
+        // 监听表单提交
+        document.getElementById('submitBtn').onclick = function (e) {
+          const file = document.getElementById('fileSelector').files[0];
+          if (!file) {
+            document.getElementById('msg').innerText = '未选择上传文件';
+            return;
+          }
+          file &&
+            uploadFile(file, function (err, data) {
+              console.log(err || data);
+              document.getElementById('msg').innerText = err
+                ? err
+                : '上传成功，ETag=' + data.ETag;
+            });
+        };
+      })();
+    </script>
+  </body>
+</html>

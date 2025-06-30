@@ -2,8 +2,12 @@
 .PHONY: run teardown
 
 run:
-	cd ./server/cmd/server && \
-	go run main.go
+	export GO_CONFIG_ENV=prod
+	export TENCENT_SECRET_KEY=66weGkLm2AEBtPo0ymSzRo5B8wrCOQFw 
+	go env -w GO111MODULE='auto'
+	go env -w GOPROXY=https://goproxy.cn,direct
+	go run cmd/server/main.go
+
 
 teardown:
 	-PID=$$(lsof -t -i :9197); \

@@ -2,6 +2,7 @@ package v1
 
 import (
 	"kano/internal/config"
+	"kano/internal/middleware"
 	"kano/internal/repository/model"
 	"kano/internal/service"
 	"kano/pkg/response"
@@ -62,6 +63,9 @@ func SaveUploadRecord(c *gin.Context) {
 		return
 	}
 
+	for _, v := range pararms {
+		v.Username, _ = middleware.GetUserName(c)
+	}
 	// Save the file to a specific location
 	err := service.NewUploader(service.UploadTypeTencent).UploadRecord(c, pararms)
 

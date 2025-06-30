@@ -1,0 +1,36 @@
+app:
+  name: "kano"
+  app_env: "prod"
+server:
+  host: "0.0.0.0"
+  port: "9198"
+logger:
+  log_level: 0
+  console_logging_enabled: true
+  encode_logs_as_json: false
+  file_logging_enabled: true
+  filename: "../../logs/kano.log"
+  max_size: 100
+  max_backups: 50
+dbs:
+- connection_name: "default"
+  driver: "mysql"
+  database: "kano"
+  charset: "utf8mb4"
+  debug: true
+
+tencentyun:
+  app_id: "1317863220"
+  secret_id: "***************"
+  bucket: "imagine-hub-1317863220"
+  path: "tuling"
+  region: "ap-shanghai"
+  endpoint: "https://imagine-hub-1317863220.cos.ap-shanghai.myqcloud.com"  
+
+
+  # secret_key: '66weGkLm2AEBtPo0ymSzRo5B8wrCOQFw'
+
+application_codes:
+  - imagine_hub
+  - test
+  - kano
